@@ -1,0 +1,48 @@
+{
+  "name": "cosmopolitan-vscode",
+  "displayName": "Cosmopolitan C/C++",
+  "description": "Automatically install Cosmopolitan and configure C/C++ workspaces to build with cosmocc.",
+  "version": "0.0.1",
+  "publisher": "tinylittle-us",
+  "license": "ISC",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "extensionDependencies": [
+    "ms-vscode.cpptools"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "cosmopolitan.setup",
+        "title": "Cosmopolitan: Install Toolchain and Configure Workspace"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "jsonc-parser": "^3.3.1",
+    "yauzl": "^3.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "@types/vscode": "^1.90.0",
+    "@types/yauzl": "^2.10.3",
+    "typescript": "^5.5.3"
+  }
+}
