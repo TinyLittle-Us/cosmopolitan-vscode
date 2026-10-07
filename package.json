@@ -31,6 +31,34 @@
       {
         "command": "cosmopolitan.setup",
         "title": "Cosmopolitan: Install Toolchain and Configure Workspace"
+      },
+      {
+        "command": "cosmopolitan.launch",
+        "title": "Cosmopolitan: Launch Workspace"
+      }
+    ],
+    "configuration": {
+      "title": "Cosmopolitan",
+      "properties": {
+        "cosmopolitan.debuggerPath": {
+          "type": "string",
+          "default": "gdb",
+          "description": "Path to a GDB executable for the Cosmopolitan launch configuration."
+        }
+      }
+    },
+    "taskDefinitions": [
+      {
+        "type": "cosmopolitan",
+        "required": [
+          "workspaceFolder"
+        ],
+        "properties": {
+          "workspaceFolder": {
+            "type": "string",
+            "description": "Workspace folder this Cosmopolitan build task belongs to."
+          }
+        }
       }
     ]
   },
