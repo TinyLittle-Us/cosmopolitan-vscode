@@ -5,6 +5,10 @@
   "version": "0.0.1",
   "publisher": "tinylittle-us",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TinyLittle-Us/cosmopolitan-vscode.git"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -33,6 +37,7 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
+    "package": "vsce package",
     "watch": "tsc -watch -p ./"
   },
   "dependencies": {
@@ -43,6 +48,7 @@
     "@types/node": "^20.14.10",
     "@types/vscode": "^1.90.0",
     "@types/yauzl": "^2.10.3",
+    "@vscode/vsce": "^4.0.0",
     "typescript": "^5.5.3"
   }
 }

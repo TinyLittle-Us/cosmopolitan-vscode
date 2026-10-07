@@ -5,13 +5,25 @@ import { CosmoccToolchain } from './installer';
 
 export async function configureWorkspace(folder: vscode.WorkspaceFolder, toolchain: CosmoccToolchain): Promise<void> {
 	const cppConfiguration = vscode.workspace.getConfiguration('C_Cpp', folder.uri);
-	const compilerPath = toolchain.shell ?? toolchain.cCompiler;
-	const compilerArgs = toolchain.shell
-		? ['-c', `export PATH=${quoteShellPath(path.join(toolchain.root, 'bin'))}:"$PATH"; exec ${quoteShellPath(toolchain.cCompiler)} "$@"`, 'cosmocc']
+	const isWindows = Boolean(toolchain.shell);
+	const compilerPath = isWindows ? '' : toolchain.cCompiler;
+	const compilerArgs: string[] = [];
+	const toolchainIncludes = isWindows
+		? [path.join(toolchain.root, 'include'), path.join(toolchain.root, 'include', '**')]
 		: [];
+	const currentIncludes = cppConfiguration.get<string[]>('default.includePath', []);
+	const includePath = [...new Set([...currentIncludes, ...toolchainIncludes])];
+	const toolchainDefines = isWindows ? ['__COSMOPOLITAN__', '__COSMOCC__', '__FATCOSMOCC__'] : [];
+	const currentDefines = cppConfiguration.get<string[]>('default.defines', []);
+	const defines = [...new Set([...currentDefines, ...toolchainDefines])];
 	await Promise.all([
 		cppConfiguration.update('default.compilerPath', compilerPath, vscode.ConfigurationTarget.WorkspaceFolder),
 		cppConfiguration.update('default.compilerArgs', compilerArgs, vscode.ConfigurationTarget.WorkspaceFolder),
+		cppConfiguration.update('default.includePath', includePath, vscode.ConfigurationTarget.WorkspaceFolder),
+		cppConfiguration.update('default.defines', defines, vscode.ConfigurationTarget.WorkspaceFolder),
+		...(isWindows
+			? [cppConfiguration.update('default.intelliSenseMode', 'windows-gcc-x64', vscode.ConfigurationTarget.WorkspaceFolder)]
+			: []),
 		cppConfiguration.update('default.cStandard', 'c17', vscode.ConfigurationTarget.WorkspaceFolder),
 		cppConfiguration.update('default.cppStandard', 'c++20', vscode.ConfigurationTarget.WorkspaceFolder)
 	]);
@@ -66,14 +78,17 @@ function createBuildTask(label: string, compilerPath: string, toolchain: Cosmocc
 		args,
 		options: {
 			cwd: '${fileDirname}',
-			...(toolchain.shell ? { env: { PATH: [path.join(toolchain.root, 'bin'), process.env.PATH ?? ''].join(path.delimiter) } } : {})
+			...(toolchain.shell
+				? {
+					env: {
+						PATH: [path.join(toolchain.root, 'bin'), process.env.PATH ?? ''].join(path.delimiter),
+						TMPDIR: '.'
+					}
+				}
+				: {})
 		},
 		group: 'build',
 		problemMatcher: '$gcc'
 	};
 }
 
-function quoteShellPath(value: string): string {
-	const posixPath = value.replace(/^([a-zA-Z]):[\\/]/, (_match, drive: string, rest: string) => `/${drive.toLowerCase()}/${rest}`).replace(/\\/g, '/');
-	return `'${posixPath.replace(/'/g, "'\\''")}'`;
-}

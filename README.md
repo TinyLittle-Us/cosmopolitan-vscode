@@ -13,7 +13,10 @@ The first setup downloads a large archive (currently about 442 MB) and requires 
 ```sh
 npm install
 npm run compile
+npm run package
 ```
+
+`npm run package` runs the VS Code extension packaging tool and creates a `.vsix` file in the project directory. It invokes the `vscode:prepublish` hook to compile the extension first.
 
 ## Note about the license
 

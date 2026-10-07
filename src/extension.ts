@@ -12,7 +12,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		if (setupInProgress) {
 			return setupInProgress;
 		}
-		setupInProgress = vscode.window.withProgress(
+		setupInProgress = Promise.resolve(vscode.window.withProgress(
 			{ location: vscode.ProgressLocation.Notification, title: 'Setting up Cosmopolitan', cancellable: false },
 			async (progress) => {
 				const toolchain = await ensureCosmocc(context.globalStorageUri.fsPath, (message) => progress.report({ message }));
@@ -27,7 +27,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				output.appendLine(`Cosmopolitan C compiler: ${toolchain.cCompiler}`);
 				output.appendLine(`Cosmopolitan C++ compiler: ${toolchain.cppCompiler}`);
 			}
-		).catch((error: unknown) => {
+		)).catch((error: unknown) => {
 			const message = error instanceof Error ? error.message : String(error);
 			output.appendLine(`Setup failed: ${message}`);
 			void vscode.window.showErrorMessage(`Cosmopolitan setup failed: ${message}`, 'Show Output').then((choice) => {

@@ -8,13 +8,20 @@ const DOWNLOAD_URL = 'https://cosmo.zip/pub/cosmocc/cosmocc.zip';
 const COSMOS_BIN_URL = 'https://cosmo.zip/pub/cosmos/bin';
 const INSTALL_DIRECTORY = 'cosmocc';
 const INSTALL_MARKER = '.cosmopolitan-install.json';
-const WINDOWS_SHELL_TOOLS = [
+
+interface WindowsShellTool {
+	command: string;
+	archive: string;
+}
+
+const WINDOWS_SHELL_TOOLS: WindowsShellTool[] = [
 	{ command: 'dash', archive: 'dash' },
 	{ command: 'cat', archive: 'cat' },
 	{ command: 'mkdir', archive: 'mkdir.ape' },
 	{ command: 'less', archive: 'less' },
 	{ command: 'kill', archive: 'kill' },
 	{ command: 'cp', archive: 'cp.ape' },
+	{ command: 'mv', archive: 'mv.ape' },
 	{ command: 'rm', archive: 'rm.ape' }
 ];
 
@@ -31,6 +38,11 @@ interface InstallMarker {
 	cCompiler: string;
 	cppCompiler: string;
 	shell?: string;
+}
+
+interface ArchiveSymlink {
+	path: string;
+	target: string;
 }
 
 export async function ensureCosmocc(
@@ -59,12 +71,12 @@ export async function ensureCosmocc(
 		report('Extracting Cosmopolitan');
 		await fs.promises.mkdir(stagingPath, { recursive: true });
 		const extractedFiles = await extractZip(archivePath, stagingPath);
-		const cCompiler = findCompiler(extractedFiles, ['cosmocc', 'cosmocc.exe', 'x86_64-unknown-cosmo-cc.exe', 'x86_64-unknown-cosmo-cc']);
-		const cppCompiler = findCompiler(extractedFiles, ['cosmoc++', 'cosmoc++.exe', 'x86_64-unknown-cosmo-c++.exe', 'x86_64-unknown-cosmo-c++']);
+		const cCompiler = findCompiler(extractedFiles, ['cosmocc', 'cosmocc.exe', 'unknown-unknown-cosmo-cc', 'x86_64-unknown-cosmo-cc.exe', 'x86_64-unknown-cosmo-cc']);
+		const cppCompiler = findCompiler(extractedFiles, ['cosmoc++', 'cosmoc++.exe', 'unknown-unknown-cosmo-c++', 'x86_64-unknown-cosmo-c++.exe', 'x86_64-unknown-cosmo-c++']);
 		if (!cCompiler || !cppCompiler) {
 			throw new Error('The downloaded archive did not contain the expected cosmocc and cosmoc++ compiler drivers.');
 		}
-		const shell = process.platform === 'win32' ? await installWindowsShellTools(stagingPath, report) : undefined;
+		const shell = process.platform === 'win32' ? await ensureWindowsShellTools(stagingPath, report) : undefined;
 
 		const marker: InstallMarker = {
 			schema: 2,
@@ -104,6 +116,9 @@ async function readInstalledToolchain(installPath: string, markerPath: string): 
 		]);
 		if (process.platform === 'win32' && !shell) {
 			return undefined;
+		}
+		if (process.platform === 'win32') {
+			await ensureWindowsShellTools(installPath, () => undefined);
 		}
 		return { root: installPath, cCompiler, cppCompiler, shell };
 	} catch {
@@ -150,6 +165,7 @@ async function extractZip(archivePath: string, destination: string): Promise<str
 			}
 
 			const extractedFiles: string[] = [];
+			const archiveSymlinks: ArchiveSymlink[] = [];
 			let settled = false;
 			const fail = (error: Error): void => {
 				if (settled) {
@@ -163,16 +179,20 @@ async function extractZip(archivePath: string, destination: string): Promise<str
 			zipFile.on('error', fail);
 			zipFile.on('end', () => {
 				if (!settled) {
-					settled = true;
-					zipFile.close();
-					resolve(extractedFiles);
+					void materializeArchiveSymlinks(archiveSymlinks, destination).then((symlinkFiles) => {
+						if (!settled) {
+							settled = true;
+							zipFile.close();
+							resolve([...extractedFiles, ...symlinkFiles]);
+						}
+					}).catch((error: unknown) => fail(error instanceof Error ? error : new Error(String(error))));
 				}
 			});
 			zipFile.on('entry', (entry) => {
 				void (async () => {
 					const relativeName = entry.fileName.replace(/\\/g, '/');
 					const segments = relativeName.split('/');
-					if (relativeName.startsWith('/') || segments.some((segment) => segment === '..' || segment.includes(':'))) {
+					if (relativeName.startsWith('/') || segments.some((segment: string | string[]) => segment === '..' || segment.includes(':'))) {
 						throw new Error(`Unsafe path in Cosmopolitan archive: ${entry.fileName}`);
 					}
 					const targetPath = path.resolve(destination, ...segments);
@@ -181,6 +201,7 @@ async function extractZip(archivePath: string, destination: string): Promise<str
 					}
 					const unixMode = (entry.externalFileAttributes >>> 16) & 0xffff;
 					if ((unixMode & 0o170000) === 0o120000) {
+						archiveSymlinks.push({ path: relativeName, target: await readSymlinkTarget(zipFile, entry) });
 						zipFile.readEntry();
 						return;
 					}
@@ -194,7 +215,7 @@ async function extractZip(archivePath: string, destination: string): Promise<str
 									streamReject(streamError ?? new Error(`Unable to extract ${entry.fileName}.`));
 									return;
 								}
-								const writeStream = fs.createWriteStream(targetPath, { flags: 'wx' });
+								const writeStream = fs.createWriteStream(targetPath, { flags: 'w' });
 								void pipeline(readStream, writeStream).then(streamResolve, streamReject);
 							});
 						});
@@ -211,6 +232,81 @@ async function extractZip(archivePath: string, destination: string): Promise<str
 	});
 }
 
+async function readSymlinkTarget(zipFile: yauzl.ZipFile, entry: yauzl.Entry): Promise<string> {
+	return new Promise((resolve, reject) => {
+		zipFile.openReadStream(entry, (error, stream) => {
+			if (error || !stream) {
+				reject(error ?? new Error(`Unable to read symlink ${entry.fileName} from the archive.`));
+				return;
+			}
+			const chunks: Buffer[] = [];
+			stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+			stream.on('error', reject);
+			stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+		});
+	});
+}
+
+async function materializeArchiveSymlinks(links: ArchiveSymlink[], destination: string): Promise<string[]> {
+	const linksByPath = new Map<string, string>();
+	for (const link of links) {
+		const linkPath = path.resolve(destination, link.path);
+		const targetPath = path.resolve(path.dirname(linkPath), link.target);
+		if (!isWithinDirectory(destination, linkPath) || !isWithinDirectory(destination, targetPath)) {
+			throw new Error(`Unsafe symlink in Cosmopolitan archive: ${link.path}`);
+		}
+		linksByPath.set(linkPath, targetPath);
+	}
+
+	const materialized: string[] = [];
+	for (const [linkPath, targetPath] of linksByPath) {
+		if (await copyArchiveLink(linkPath, targetPath, linksByPath, new Set())) {
+			materialized.push(path.relative(destination, linkPath).split(path.sep).join('/'));
+		}
+	}
+	return materialized;
+}
+
+async function copyArchiveLink(
+	linkPath: string,
+	targetPath: string,
+	linksByPath: Map<string, string>,
+	resolving: Set<string>
+): Promise<boolean> {
+	if (resolving.has(linkPath)) {
+		throw new Error(`Cyclic symlink in Cosmopolitan archive: ${linkPath}`);
+	}
+	resolving.add(linkPath);
+	try {
+		try {
+			await fs.promises.access(targetPath);
+		} catch {
+			const chainedTarget = linksByPath.get(targetPath);
+			if (!chainedTarget || !await copyArchiveLink(targetPath, chainedTarget, linksByPath, resolving)) {
+				return false;
+			}
+		}
+		const targetStats = await fs.promises.stat(targetPath);
+		await fs.promises.mkdir(path.dirname(linkPath), { recursive: true });
+		if (targetStats.isDirectory()) {
+			await fs.promises.cp(targetPath, linkPath, { recursive: true, force: true, dereference: true });
+		} else {
+			await fs.promises.copyFile(targetPath, linkPath);
+			if (process.platform !== 'win32') {
+				await fs.promises.chmod(linkPath, targetStats.mode & 0o777);
+			}
+		}
+		return true;
+	} finally {
+		resolving.delete(linkPath);
+	}
+}
+
+function isWithinDirectory(root: string, candidate: string): boolean {
+	const relativePath = path.relative(root, candidate);
+	return relativePath !== '..' && !relativePath.startsWith(`..${path.sep}`) && !path.isAbsolute(relativePath);
+}
+
 function findCompiler(files: string[], names: string[]): string | undefined {
 	for (const name of names) {
 		const match = files.find((file) => path.posix.basename(file).toLowerCase() === name.toLowerCase());
@@ -221,14 +317,42 @@ function findCompiler(files: string[], names: string[]): string | undefined {
 	return undefined;
 }
 
-async function installWindowsShellTools(stagingPath: string, report: (message: string) => void): Promise<string> {
-	const binPath = path.join(stagingPath, 'bin');
+async function ensureWindowsShellTools(toolchainPath: string, report: (message: string) => void): Promise<string> {
+	const binPath = path.join(toolchainPath, 'bin');
 	await fs.promises.mkdir(binPath, { recursive: true });
 	for (const tool of WINDOWS_SHELL_TOOLS) {
-		report(`Installing Windows shell support: ${tool.command}`);
-		await download(`${COSMOS_BIN_URL}/${tool.archive}`, path.join(binPath, `${tool.command}.exe`), () => undefined);
+		const commandPath = path.join(binPath, tool.command);
+		const executablePath = `${commandPath}.exe`;
+		if (!await pathExists(commandPath)) {
+			report(`Installing Windows shell support: ${tool.command}`);
+			if (await pathExists(executablePath)) {
+				await fs.promises.copyFile(executablePath, commandPath);
+			} else {
+				await download(`${COSMOS_BIN_URL}/${tool.archive}`, commandPath, () => undefined);
+			}
+		}
+		if (!await pathExists(executablePath)) {
+			await fs.promises.copyFile(commandPath, executablePath);
+		}
 	}
 	const shellPath = path.join(binPath, 'dash.exe');
-	await fs.promises.copyFile(shellPath, path.join(binPath, 'sh.exe'));
+	const dashPath = path.join(binPath, 'dash');
+	const shPath = path.join(binPath, 'sh');
+	const shExecutablePath = path.join(binPath, 'sh.exe');
+	if (!await pathExists(shPath)) {
+		await fs.promises.copyFile(dashPath, shPath);
+	}
+	if (!await pathExists(shExecutablePath)) {
+		await fs.promises.copyFile(shellPath, shExecutablePath);
+	}
 	return shellPath;
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+	try {
+		await fs.promises.access(filePath);
+		return true;
+	} catch {
+		return false;
+	}
 }
