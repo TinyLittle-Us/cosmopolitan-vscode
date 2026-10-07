@@ -31,6 +31,9 @@ export function activate(context: vscode.ExtensionContext): void {
 				if (toolchain.shell) {
 					process.env.PATH = [path.join(toolchain.root, 'bin'), process.env.PATH ?? ''].join(path.delimiter);
 				}
+				if (toolchain.debuggerPath && path.isAbsolute(toolchain.debuggerPath)) {
+					process.env.PATH = [path.dirname(toolchain.debuggerPath), process.env.PATH ?? ''].join(path.delimiter);
+				}
 				const folders = vscode.workspace.workspaceFolders ?? [];
 				for (const folder of folders) {
 					await configureWorkspace(folder, toolchain);

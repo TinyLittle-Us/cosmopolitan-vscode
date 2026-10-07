@@ -31,7 +31,7 @@ export async function configureWorkspace(folder: vscode.WorkspaceFolder, toolcha
 		cppConfiguration.update('default.cppStandard', 'c++20', vscode.ConfigurationTarget.WorkspaceFolder)
 	]);
 	await configureBuildTasks(folder, toolchain);
-	await configureLaunchConfiguration(folder);
+	await configureLaunchConfiguration(folder, toolchain);
 }
 
 async function configureBuildTasks(folder: vscode.WorkspaceFolder, toolchain: CosmoccToolchain): Promise<void> {
@@ -107,7 +107,7 @@ function createBuildTask(label: string, compilerPath: string, toolchain: Cosmocc
 	};
 }
 
-async function configureLaunchConfiguration(folder: vscode.WorkspaceFolder): Promise<void> {
+async function configureLaunchConfiguration(folder: vscode.WorkspaceFolder, toolchain: CosmoccToolchain): Promise<void> {
 	const vscodeDirectory = vscode.Uri.joinPath(folder.uri, '.vscode');
 	const launchUri = vscode.Uri.joinPath(vscodeDirectory, 'launch.json');
 	await vscode.workspace.fs.createDirectory(vscodeDirectory);
@@ -125,6 +125,7 @@ async function configureLaunchConfiguration(folder: vscode.WorkspaceFolder): Pro
 		throw new Error(`Cannot configure Cosmopolitan launch settings because ${launchUri.fsPath} contains invalid JSONC.`);
 	}
 	const existingConfigurations = Array.isArray(parsed.configurations) ? parsed.configurations : [];
+	const debuggerOverride = vscode.workspace.getConfiguration('cosmopolitan', folder.uri).get<string>('debuggerPath', '').trim();
 	const configurations = existingConfigurations.filter((configuration) =>
 		!configuration || typeof configuration !== 'object' || (configuration as { name?: string }).name !== WORKSPACE_LAUNCH_CONFIGURATION
 	);
@@ -139,8 +140,18 @@ async function configureLaunchConfiguration(folder: vscode.WorkspaceFolder): Pro
 		environment: [],
 		externalConsole: false,
 		MIMode: 'gdb',
-		miDebuggerPath: '${config:cosmopolitan.debuggerPath}',
-		preLaunchTask: WORKSPACE_BUILD_TASK_LABEL
+		miDebuggerPath: debuggerOverride || toolchain.debuggerPath || 'gdb',
+		sourceFileMap: {
+			[gdbSourceRoot(folder.uri.fsPath)]: '${workspaceFolder}'
+		},
+		preLaunchTask: WORKSPACE_BUILD_TASK_LABEL,
+		setupCommands: [
+			{
+				description: 'Load Cosmopolitan debug symbols',
+				text: 'add-symbol-file "${workspaceFolder}/${workspaceFolderBasename}.exe.com.dbg" 0x401000',
+				ignoreFailures: false
+			}
+		]
 	});
 
 	const formattingOptions = { insertSpaces: true, tabSize: 2 };
@@ -149,5 +160,11 @@ async function configureLaunchConfiguration(folder: vscode.WorkspaceFolder): Pro
 	edits = modify(contents, ['configurations'], configurations, { formattingOptions });
 	contents = applyEdits(contents, edits);
 	await vscode.workspace.fs.writeFile(launchUri, new TextEncoder().encode(contents));
+}
+
+function gdbSourceRoot(workspacePath: string): string {
+	const normalizedPath = workspacePath.replace(/\\/g, '/');
+	const windowsDrive = /^([a-zA-Z]):/.exec(normalizedPath);
+	return windowsDrive ? `/${windowsDrive[1].toLowerCase()}${normalizedPath.slice(2)}` : normalizedPath;
 }
 

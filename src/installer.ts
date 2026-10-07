@@ -1,11 +1,13 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as https from 'node:https';
+import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import * as yauzl from 'yauzl';
 
 const DOWNLOAD_URL = 'https://cosmo.zip/pub/cosmocc/cosmocc.zip';
 const COSMOS_BIN_URL = 'https://cosmo.zip/pub/cosmos/bin';
+const MSYS2_BASE_URL = 'https://github.com/msys2/msys2-installer/releases/download/nightly-x86_64/msys2-base-x86_64-latest.sfx.exe';
 const INSTALL_DIRECTORY = 'cosmocc';
 const INSTALL_MARKER = '.cosmopolitan-install.json';
 
@@ -30,6 +32,7 @@ export interface CosmoccToolchain {
 	cCompiler: string;
 	cppCompiler: string;
 	shell?: string;
+	debuggerPath?: string;
 }
 
 interface InstallMarker {
@@ -53,7 +56,7 @@ export async function ensureCosmocc(
 	const markerPath = path.join(installPath, INSTALL_MARKER);
 	const cached = await readInstalledToolchain(installPath, markerPath);
 	if (cached) {
-		return cached;
+		return ensureDebugger(storagePath, cached, report);
 	}
 
 	await fs.promises.mkdir(storagePath, { recursive: true });
@@ -88,12 +91,12 @@ export async function ensureCosmocc(
 		await fs.promises.writeFile(path.join(stagingPath, INSTALL_MARKER), JSON.stringify(marker, null, 2));
 		await fs.promises.rm(installPath, { recursive: true, force: true });
 		await fs.promises.rename(stagingPath, installPath);
-		return {
+		return ensureDebugger(storagePath, {
 			root: installPath,
 			cCompiler: path.join(installPath, cCompiler),
 			cppCompiler: path.join(installPath, cppCompiler),
 			shell: shell ? path.join(installPath, path.relative(stagingPath, shell)) : undefined
-		};
+		}, report);
 	} finally {
 		await fs.promises.rm(archivePath, { force: true });
 		await fs.promises.rm(stagingPath, { recursive: true, force: true });
@@ -355,4 +358,115 @@ async function pathExists(filePath: string): Promise<boolean> {
 	} catch {
 		return false;
 	}
+}
+
+async function ensureDebugger(
+	storagePath: string,
+	toolchain: CosmoccToolchain,
+	report: (message: string) => void
+): Promise<CosmoccToolchain> {
+	if (process.platform !== 'win32' || process.arch !== 'x64') {
+		return { ...toolchain, debuggerPath: findOnPath(process.platform === 'win32' ? 'gdb.exe' : 'gdb') ?? 'gdb' };
+	}
+
+	try {
+		const debuggerPath = await ensureWindowsGdb(storagePath, report);
+		return { ...toolchain, debuggerPath };
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		report(`GDB setup failed; builds remain available, but debugging needs GDB: ${message}`);
+		return { ...toolchain, debuggerPath: findOnPath('gdb.exe') ?? 'gdb' };
+	}
+}
+
+async function ensureWindowsGdb(storagePath: string, report: (message: string) => void): Promise<string> {
+	const installPath = path.join(storagePath, 'gdb-runtime');
+	const msysPath = path.join(installPath, 'msys64');
+	const gdbPath = path.join(msysPath, 'ucrt64', 'bin', 'gdb.exe');
+	if (await pathExists(gdbPath)) {
+		return gdbPath;
+	}
+
+	const archivePath = path.join(storagePath, 'msys2-base.sfx.exe');
+	const stagingPath = path.join(storagePath, 'gdb.installing');
+	await fs.promises.mkdir(storagePath, { recursive: true });
+	await fs.promises.rm(archivePath, { force: true });
+	await fs.promises.rm(stagingPath, { recursive: true, force: true });
+
+	try {
+		report('Downloading the MSYS2 base runtime for GDB');
+		await download(MSYS2_BASE_URL, archivePath, () => undefined);
+		await fs.promises.mkdir(stagingPath, { recursive: true });
+		report('Extracting MSYS2');
+		await runProcess(archivePath, ['-y', `-o${stagingPath}`]);
+
+		const stagedMsysPath = path.join(stagingPath, 'msys64');
+		const bashPath = path.join(stagedMsysPath, 'usr', 'bin', 'bash.exe');
+		if (!await pathExists(bashPath)) {
+			throw new Error('The MSYS2 archive did not contain usr/bin/bash.exe.');
+		}
+		const environment = { ...process.env, MSYSTEM: 'UCRT64', CHERE_INVOKING: 'yes' };
+		for (let update = 0; update < 2; update++) {
+			report(`Updating MSYS2 packages (${update + 1}/2)`);
+			await runProcess(bashPath, ['-lc', 'pacman --noconfirm -Syuu'], { cwd: stagedMsysPath, env: environment });
+		}
+		report('Installing GDB and its runtime dependencies');
+		await runProcess(
+			bashPath,
+			['-lc', 'pacman --noconfirm -S --needed mingw-w64-ucrt-x86_64-gdb'],
+			{ cwd: stagedMsysPath, env: environment }
+		);
+		if (!await pathExists(path.join(stagedMsysPath, 'ucrt64', 'bin', 'gdb.exe'))) {
+			throw new Error('MSYS2 completed without creating ucrt64/bin/gdb.exe.');
+		}
+
+		await fs.promises.rm(installPath, { recursive: true, force: true });
+		await fs.promises.rename(stagingPath, installPath);
+		return gdbPath;
+	} finally {
+		await fs.promises.rm(archivePath, { force: true });
+		await fs.promises.rm(stagingPath, { recursive: true, force: true });
+	}
+}
+
+interface ProcessOptions {
+	cwd: string;
+	env: NodeJS.ProcessEnv;
+}
+
+async function runProcess(executable: string, args: string[], options?: ProcessOptions): Promise<void> {
+	await new Promise<void>((resolve, reject) => {
+		const child = spawn(executable, args, {
+			cwd: options?.cwd,
+			env: options?.env,
+			windowsHide: true,
+			stdio: ['ignore', 'ignore', 'pipe']
+		});
+		let stderr = '';
+		child.stderr?.on('data', (chunk: Buffer) => {
+			stderr = (stderr + chunk.toString()).slice(-4000);
+		});
+		child.once('error', reject);
+		child.once('close', (code) => {
+			if (code === 0) {
+				resolve();
+			} else {
+				reject(new Error(`${path.basename(executable)} exited with code ${code ?? 'unknown'}${stderr ? `: ${stderr.trim()}` : ''}`));
+			}
+		});
+	});
+}
+
+function findOnPath(command: string): string | undefined {
+	const pathEntries = (process.env.PATH ?? '').split(path.delimiter);
+	const extensions = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : [''];
+	for (const entry of pathEntries) {
+		for (const extension of extensions) {
+			const candidate = path.join(entry, command.endsWith(extension) ? command : `${command}${extension}`);
+			if (fs.existsSync(candidate)) {
+				return candidate;
+			}
+		}
+	}
+	return undefined;
 }

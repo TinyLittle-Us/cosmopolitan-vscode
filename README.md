@@ -6,7 +6,7 @@ This extension installs the Cosmopolitan `cosmocc` toolchain from the official `
 
 On activation, it configures each open workspace folder's `.vscode/settings.json` with the Cosmopolitan compiler and C/C++ language standards. It adds single-file and workspace build tasks to `.vscode/tasks.json`, preserving unrelated settings and tasks. Run **Cosmopolitan: Launch Workspace** from the Command Palette to build all C/C++ sources and start the generated launch configuration. Run **Cosmopolitan: Install Toolchain and Configure Workspace** to retry setup at any time.
 
-The first setup downloads a large archive (currently about 442 MB) and requires network access to `cosmo.zip`. Build tasks use `-g -O0` and retain debug symbols. The generated GDB launch configuration uses `gdb` by default; install a Windows-compatible GDB and set `cosmopolitan.debuggerPath` to its executable path if it is not on `PATH`. Cosmopolitan emits a `.dbg` sidecar for source-level debugging; complete sidecar-aware debugging remains a future integration step.
+The first setup downloads the Cosmopolitan compiler archive (currently about 442 MB). On Windows, setup also bootstraps a private MSYS2 runtime and installs its UCRT64 GDB package into VS Code extension storage; no administrator access or system PATH changes are needed. Build tasks use `-g -O0` and retain debug symbols. You can override the detected debugger using `cosmopolitan.debuggerPath`. Cosmopolitan emits a `.dbg` sidecar for source-level debugging; complete sidecar-aware debugging remains a future integration step.
 
 ## Build the extension
 

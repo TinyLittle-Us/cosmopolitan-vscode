@@ -42,8 +42,8 @@
       "properties": {
         "cosmopolitan.debuggerPath": {
           "type": "string",
-          "default": "gdb",
-          "description": "Path to a GDB executable for the Cosmopolitan launch configuration."
+          "default": "",
+          "description": "Optional path to override the GDB executable installed or discovered by setup."
         }
       }
     },
