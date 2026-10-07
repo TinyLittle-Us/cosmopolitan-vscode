@@ -2,8 +2,10 @@
   "name": "cosmopolitan-vscode",
   "displayName": "Cosmopolitan C/C++",
   "description": "Automatically install Cosmopolitan and configure C/C++ workspaces to build with cosmocc.",
-  "version": "0.0.1",
-  "publisher": "tinylittle-us",
+	"icon": "cosmopolitan-vscode-icon.webp",
+  "version": "1.0.0",
+	"author": "TinyLittle.Us",
+  "publisher": "TinyLittleUs",
   "license": "ISC",
   "repository": {
     "type": "git",
@@ -19,7 +21,8 @@
     "node_modules/pend/index.js",
     "README.md",
     "LICENSE",
-    "cosmopolitan-vscode-banner.webp"
+    "cosmopolitan-vscode-banner.webp",
+    "cosmopolitan-vscode-icon.webp"
   ],
   "engines": {
     "vscode": "^1.90.0"
