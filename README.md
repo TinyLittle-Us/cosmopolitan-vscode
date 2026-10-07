@@ -1,13 +1,4 @@
-<style>
-img {
-  padding: 8px;
-  border-radius: 8px;
-  box-shadow: 2px 2px 8px #abc;
-  background-color: #def;
-}
-</style>
-
-![Cosmopolitan Honey Badger in Visual Studio Code](cosmopolitan-vscode-banner.webp)
+<img style="padding: 8px; border-radius: 8px; box-shadow: 2px 2px 8px #abc; background-color: #def;" alt="Cosmopolitan Honey Badger in Visual Studio Code" src="cosmopolitan-vscode-banner.webp"/>
 
 # Cosmopolitan C/C++ for VS Code
 
