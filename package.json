@@ -9,6 +9,18 @@
     "type": "git",
     "url": "https://github.com/TinyLittle-Us/cosmopolitan-vscode.git"
   },
+  "files": [
+    "out/**/*.js",
+    "node_modules/jsonc-parser/package.json",
+    "node_modules/jsonc-parser/lib/umd/**/*.js",
+    "node_modules/yauzl/package.json",
+    "node_modules/yauzl/*.js",
+    "node_modules/pend/package.json",
+    "node_modules/pend/index.js",
+    "README.md",
+    "LICENSE",
+    "cosmopolitan-vscode-banner.webp"
+  ],
   "engines": {
     "vscode": "^1.90.0"
   },
